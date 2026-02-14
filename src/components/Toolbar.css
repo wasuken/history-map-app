@@ -1,0 +1,53 @@
+/* src/components/Toolbar.css */
+.toolbar-container {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.toolbar-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background-color: white;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.toolbar-button.active {
+  background-color: #3b82f6;
+  color: white;
+  border-color: #3b82f6;
+  font-weight: 600;
+}
+
+.toolbar-separator {
+  width: 1px;
+  height: 24px;
+  background-color: #ddd;
+  margin: 0 4px;
+}
+
+.reset-button {
+  border-color: #dc2626;
+  color: #dc2626;
+}
+.reset-button:hover {
+  background-color: #dc2626;
+  color: white;
+}
+
+.export-button {
+  border-color: #059669;
+  background-color: #059669;
+  color: white;
+  font-weight: 600;
+}
+.export-button:hover {
+  background-color: #047857;
+  border-color: #047857;
+}

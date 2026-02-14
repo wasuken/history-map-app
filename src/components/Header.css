@@ -1,0 +1,48 @@
+/* src/components/Header.css */
+
+.app-header {
+  padding: 16px;
+  background-color: white;
+  border-bottom: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.header-spacer {
+  flex: 1 1 auto;
+}
+
+.highlight-reset-button {
+  padding: 8px 16px;
+  font-size: 14px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background-color: white;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.highlight-reset-button:hover {
+  background-color: #f5f5f5;
+}
+
+/* Responsive Styles */
+@media (max-width: 900px) {
+  .app-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .header-spacer {
+    display: none;
+  }
+}
