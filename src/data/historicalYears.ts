@@ -21,9 +21,11 @@ export const HISTORICAL_YEARS: HistoricalYear[] = [
   { year: 1920, label: "1920年", filename: "world_1920.geojson" },
 ];
 
-export const BASE_URL =
-  "https://raw.githubusercontent.com/aourednik/historical-basemaps/master/geojson";
-
+// ローカルファイルを参照するように変更
 export function getHistoricalDataUrl(filename: string): string {
-  return `${BASE_URL}/${filename}`;
+  return `/data/historical/${filename}`;
+}
+
+export function getModernDataUrl(): string {
+  return '/data/modern/countries.geojson';
 }

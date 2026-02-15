@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "format": "prettier --write ./src"
+    "format": "prettier --write ./src",
+    "prepare-data": "node scripts/add-japanese-names.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^5.18.0",

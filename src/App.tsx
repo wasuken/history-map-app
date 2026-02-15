@@ -50,9 +50,7 @@ function App() {
   useEffect(() => {
     if (searchMode === "modern") {
       setIsLoading(true);
-      fetch(
-        "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson",
-      )
+      fetch("/data/modern/countries.geojson")
         .then((res) => res.json())
         .then((data: CountryCollection) => {
           setCountries(data.features);
