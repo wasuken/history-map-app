@@ -35,6 +35,7 @@ export interface DrawnPolygon {
   name: string;
   coordinates: [number, number][]; // [lng, lat]の配列
   color: string;
+  displayMode: "fill" | "outline" | "hidden";
 }
 
 // 矢印
@@ -43,6 +44,7 @@ export interface Arrow {
   start: [number, number]; // [lng, lat]
   end: [number, number]; // [lng, lat]
   memo: string;
+  displayMode: "visible" | "hidden";
 }
 
 // 注記(ピン)
@@ -50,6 +52,7 @@ export interface Note {
   id: string;
   position: [number, number]; // [lng, lat]
   text: string;
+  displayMode: "visible" | "hidden";
 }
 
 // ハイライトされた国

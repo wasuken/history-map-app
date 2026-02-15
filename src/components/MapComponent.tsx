@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "./MapComponent.css";
 import type {
-  Country,
   DrawMode,
   DrawnPolygon,
   Arrow,
@@ -10,20 +10,32 @@ import type {
   HighlightedCountry,
 } from "../types";
 
+// --- Helper Hook ---
+function usePrevious<T>(value: T): T | undefined {
+  const ref = useRef<T>();
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref.current;
+}
+
+// displayModeはApp.tsxで処理されるため、onAddプロパティの型からは除外
+type OnAddPolygon = Omit<DrawnPolygon, "displayMode">;
+type OnAddArrow = Omit<Arrow, "displayMode">;
+type OnAddNote = Omit<Note, "displayMode">;
+
 interface MapProps {
-  onMapLoad?: (map: maplibregl.Map) => void;
   highlightedCountries: HighlightedCountry[];
   drawMode: DrawMode;
   drawnPolygons: DrawnPolygon[];
   arrows: Arrow[];
   notes: Note[];
-  onAddPolygon: (polygon: DrawnPolygon) => void;
-  onAddArrow: (arrow: Arrow) => void;
-  onAddNote: (note: Note) => void;
+  onAddPolygon: (polygon: OnAddPolygon) => void;
+  onAddArrow: (arrow: OnAddArrow) => void;
+  onAddNote: (note: OnAddNote) => void;
 }
 
 export default function MapComponent({
-  onMapLoad,
   highlightedCountries,
   drawMode,
   drawnPolygons,
@@ -35,88 +47,51 @@ export default function MapComponent({
 }: MapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
+  const popup = useRef<maplibregl.Popup | null>(null);
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [arrowStart, setArrowStart] = useState<[number, number] | null>(null);
-  // sourceId をキーとして、関連するレイヤーIDを管理
-  const highlightedLayers = useRef<
-    Map<string, { fill: string; line: string }>
-  >(new Map());
+  const highlightedLayers = useRef<Map<string, { fill: string; line: string }>>(new Map());
 
+  // --- Refs to store event listeners for proper cleanup ---
+  const polygonListeners = useRef<Map<string, any>>(new Map());
+  const arrowListeners = useRef<Map<string, any>>(new Map());
+  const noteListeners = useRef<Map<string, any>>(new Map());
+
+  // --- Map Initialization ---
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
-
-    // 地図の初期化
     map.current = new maplibregl.Map({
       container: mapContainer.current,
       style: {
         version: 8,
-        sources: {
-          "raster-tiles": {
-            type: "raster",
-            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-            tileSize: 256,
-            attribution: "© OpenStreetMap contributors",
-          },
-        },
-        layers: [
-          {
-            id: "simple-tiles",
-            type: "raster",
-            source: "raster-tiles",
-            minzoom: 0,
-            maxzoom: 19,
-          },
-        ],
+        sources: { "raster-tiles": { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
+        layers: [{ id: "simple-tiles", type: "raster", source: "raster-tiles", minzoom: 0, maxzoom: 19 }],
       },
       center: [0, 20],
       zoom: 2,
     });
-
     map.current.addControl(new maplibregl.NavigationControl(), "top-right");
+    return () => { map.current?.remove(); map.current = null; };
+  }, []);
 
-    map.current.on("load", () => {
-      if (map.current && onMapLoad) {
-        onMapLoad(map.current);
-      }
-    });
-
-    return () => {
-      map.current?.remove();
-      map.current = null;
-    };
-  }, [onMapLoad]);
-
-  // クリックイベント処理
+  // --- Drawing Logic ---
   useEffect(() => {
-    if (!map.current) return;
+    const mapInstance = map.current;
+    if (!mapInstance) return;
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       const { lng, lat } = e.lngLat;
-
-      if (drawMode === "polygon") {
-        setPolygonPoints((prev) => [...prev, [lng, lat]]);
-      } else if (drawMode === "arrow") {
-        if (!arrowStart) {
-          setArrowStart([lng, lat]);
-        } else {
+      if (drawMode === "polygon") setPolygonPoints((prev) => [...prev, [lng, lat]]);
+      else if (drawMode === "arrow") {
+        if (!arrowStart) setArrowStart([lng, lat]);
+        else {
           const memo = prompt("矢印のメモを入力してください (省略可)");
-          onAddArrow({
-            id: crypto.randomUUID(),
-            start: arrowStart,
-            end: [lng, lat],
-            memo: memo || "",
-          });
+          onAddArrow({ id: crypto.randomUUID(), start: arrowStart, end: [lng, lat], memo: memo || "" });
           setArrowStart(null);
         }
       } else if (drawMode === "note") {
         const text = prompt("注記を入力してください");
-        if (text) {
-          onAddNote({
-            id: crypto.randomUUID(),
-            position: [lng, lat],
-            text,
-          });
-        }
+        if (text) onAddNote({ id: crypto.randomUUID(), position: [lng, lat], text });
       }
     };
 
@@ -125,430 +100,295 @@ export default function MapComponent({
         e.preventDefault();
         const name = prompt("ポリゴンの名前を入力してください");
         if (name) {
-          const colors = [
-            "#ef4444",
-            "#f59e0b",
-            "#10b981",
-            "#3b82f6",
-            "#8b5cf6",
-            "#ec4899",
-          ];
+          const colors = ["#ef4444", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899"];
           const color = colors[Math.floor(Math.random() * colors.length)];
-
-          onAddPolygon({
-            id: crypto.randomUUID(),
-            name,
-            coordinates: polygonPoints,
-            color,
-          });
+          onAddPolygon({ id: crypto.randomUUID(), name, coordinates: polygonPoints, color });
         }
         setPolygonPoints([]);
       }
     };
 
-    map.current.on("click", handleClick);
-    map.current.on("dblclick", handleDblClick);
+    mapInstance.on("click", handleClick);
+    mapInstance.on("dblclick", handleDblClick);
 
     return () => {
-      map.current?.off("click", handleClick);
-      map.current?.off("dblclick", handleDblClick);
+      mapInstance.off("click", handleClick);
+      mapInstance.off("dblclick", handleDblClick);
     };
-  }, [
-    drawMode,
-    polygonPoints,
-    arrowStart,
-    onAddPolygon,
-    onAddArrow,
-    onAddNote,
-  ]);
+  }, [drawMode, polygonPoints, arrowStart, onAddPolygon, onAddArrow, onAddNote]);
 
-  // ハイライト表示の更新
+  // --- Cleanup for Draw Mode Change ---
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-    const mapInstance = map.current;
+    if (drawMode !== 'polygon') setPolygonPoints([]);
+    if (drawMode !== 'arrow') setArrowStart(null);
+  }, [drawMode]);
 
+  // --- Temporary Drawing Visuals ---
+  useEffect(() => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
+    const sourceId = "drawing-source";
+    const source = mapInstance.getSource(sourceId) as maplibregl.GeoJSONSource;
+
+    if (polygonPoints.length > 0) {
+      const geojson = { type: "LineString" as const, coordinates: polygonPoints };
+      if (source) {
+        source.setData({ type: "Feature", properties: {}, geometry: geojson });
+      } else {
+        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: {}, geometry: geojson } });
+        mapInstance.addLayer({ id: "drawing-line", type: "line", source: sourceId, paint: { "line-color": "#3b82f6", "line-width": 2 } });
+        mapInstance.addLayer({ id: "drawing-points", type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#3b82f6" } });
+      }
+    } else {
+      if (source) {
+        source.setData({ type: "FeatureCollection", features: [] });
+      }
+    }
+  }, [polygonPoints]);
+
+  // --- Highlighted Countries Management ---
+  useEffect(() => {
+    console.log("debug:test")
+    const mapInstance = map.current;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
     const newLayerMap = new Map<string, { fill: string; line: string }>();
     highlightedCountries.forEach((hc) => {
-      const countryId = (
-        `${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()
-      ).replace(/[^a-zA-Z0-9]/g, "_");
+      const countryId = (`${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()).replace(/[^a-zA-Z0-9]/g, "_");
       const sourceId = `highlighted-source-${countryId}`;
-      newLayerMap.set(sourceId, {
-        fill: `highlighted-fill-${countryId}`,
-        line: `highlighted-line-${countryId}`,
-      });
+      newLayerMap.set(sourceId, { fill: `highlighted-fill-${countryId}`, line: `highlighted-line-${countryId}` });
     });
-
-    // 不要になった古いレイヤーとソースを削除
     highlightedLayers.current.forEach((layerIds, sourceId) => {
       if (!newLayerMap.has(sourceId)) {
-        if (mapInstance.getLayer(layerIds.fill))
-          mapInstance.removeLayer(layerIds.fill);
-        if (mapInstance.getLayer(layerIds.line))
-          mapInstance.removeLayer(layerIds.line);
-        if (mapInstance.getSource(sourceId))
-          mapInstance.removeSource(sourceId);
+        if (mapInstance.getLayer(layerIds.fill)) mapInstance.removeLayer(layerIds.fill);
+        if (mapInstance.getLayer(layerIds.line)) mapInstance.removeLayer(layerIds.line);
+        if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
       }
     });
-
     const bounds = new maplibregl.LngLatBounds();
-
     highlightedCountries.forEach((hc) => {
-      const countryId = (
-        `${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()
-      ).replace(/[^a-zA-Z0-9]/g, "_");
+      const countryId = (`${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()).replace(/[^a-zA-Z0-9]/g, "_");
       const sourceId = `highlighted-source-${countryId}`;
       const fillLayerId = `highlighted-fill-${countryId}`;
       const lineLayerId = `highlighted-line-${countryId}`;
-
-      if (!mapInstance.getSource(sourceId)) {
-        mapInstance.addSource(sourceId, {
-          type: "geojson",
-          data: hc.country,
-        });
-      }
-
-      // Fill Layer
-      if (!mapInstance.getLayer(fillLayerId)) {
-        mapInstance.addLayer({
-          id: fillLayerId,
-          type: "fill",
-          source: sourceId,
-          paint: {
-            "fill-color": hc.color,
-            "fill-opacity": hc.displayMode === "fill" ? 0.4 : 0,
-          },
-        });
-      } else {
-        mapInstance.setPaintProperty(
-          fillLayerId,
-          "fill-opacity",
-          hc.displayMode === "fill" ? 0.4 : 0,
-        );
-      }
-
-      // Line Layer
-      if (!mapInstance.getLayer(lineLayerId)) {
-        mapInstance.addLayer({
-          id: lineLayerId,
-          type: "line",
-          source: sourceId,
-          paint: {
-            "line-color": hc.color,
-            "line-width": 1.5,
-          },
-        });
-      } else {
-        mapInstance.setPaintProperty(lineLayerId, "line-color", hc.color);
-      }
-
-      // バウンディングボックスの計算
+      if (!mapInstance.getSource(sourceId)) mapInstance.addSource(sourceId, { type: "geojson", data: hc.country });
+      if (!mapInstance.getLayer(fillLayerId)) mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": hc.color, "fill-opacity": hc.displayMode === "fill" ? 0.4 : 0 } });
+      else mapInstance.setPaintProperty(fillLayerId, "fill-opacity", hc.displayMode === "fill" ? 0.4 : 0);
+      if (!mapInstance.getLayer(lineLayerId)) mapInstance.addLayer({ id: lineLayerId, type: "line", source: sourceId, paint: { "line-color": hc.color, "line-width": 1.5 } });
+      else mapInstance.setPaintProperty(lineLayerId, "line-color", hc.color);
       const addCoordinatesToBounds = (coordinates: any) => {
         if (!coordinates) return;
         for (const coord of coordinates) {
-          if (typeof coord[0] === "number") {
-            bounds.extend(coord as [number, number]);
-          } else {
-            addCoordinatesToBounds(coord);
-          }
+          if (typeof coord[0] === "number") bounds.extend(coord as [number, number]);
+          else addCoordinatesToBounds(coord);
         }
       };
       addCoordinatesToBounds(hc.country.geometry.coordinates);
     });
-
-    // 新しいレイヤー情報を保存
     highlightedLayers.current = newLayerMap;
-
-    // すべてのハイライトが表示されるように地図を調整
-    if (!bounds.isEmpty()) {
-      mapInstance.fitBounds(bounds, { padding: 100, maxZoom: 6 });
-    }
+    if (!bounds.isEmpty()) mapInstance.fitBounds(bounds, { padding: 100, maxZoom: 6 });
   }, [highlightedCountries]);
 
-  // 描画中のポリゴンを表示
+  // --- Drawn Polygons Management (Efficient) ---
+  const prevDrawnPolygons = usePrevious(drawnPolygons);
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-
-    const sourceId = "drawing-polygon";
-    const layerId = "drawing-polygon-layer";
-    const pointsLayerId = "drawing-points-layer";
-
-    if (map.current.getLayer(pointsLayerId)) {
-      map.current.removeLayer(pointsLayerId);
-    }
-    if (map.current.getLayer(layerId)) {
-      map.current.removeLayer(layerId);
-    }
-    if (map.current.getSource(sourceId)) {
-      map.current.removeSource(sourceId);
-    }
-
-    if (polygonPoints.length > 0) {
-      const geojson = {
-        type: "FeatureCollection" as const,
-        features: [
-          {
-            type: "Feature" as const,
-            properties: {},
-            geometry: {
-              type: "LineString" as const,
-              coordinates: polygonPoints,
-            },
-          },
-        ],
-      };
-
-      map.current.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
-
-      map.current.addLayer({
-        id: layerId,
-        type: "line",
-        source: sourceId,
-        paint: {
-          "line-color": "#3b82f6",
-          "line-width": 2,
-          "line-dasharray": [2, 2],
-        },
-      });
-
-      map.current.addLayer({
-        id: pointsLayerId,
-        type: "circle",
-        source: sourceId,
-        paint: {
-          "circle-radius": 5,
-          "circle-color": "#3b82f6",
-        },
-      });
-    }
-  }, [polygonPoints]);
-
-  // 描画済みポリゴンを表示
-  useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-
-    drawnPolygons.forEach((polygon, index) => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
+    const prevPolygonsMap = new Map(prevDrawnPolygons?.map(p => [p.id, p]));
+    const currentPolygonsMap = new Map(drawnPolygons.map(p => [p.id, p]));
+    prevPolygonsMap.forEach((_, id) => {
+      if (!currentPolygonsMap.has(id)) {
+        const sourceId = `polygon-${id}`;
+        const fillLayerId = `polygon-fill-${id}`;
+        const lineLayerId = `polygon-line-${id}`;
+        const fillEnter = polygonListeners.current.get(`${fillLayerId}-enter`);
+        const fillLeave = polygonListeners.current.get(`${fillLayerId}-leave`);
+        const lineEnter = polygonListeners.current.get(`${lineLayerId}-enter`);
+        const lineLeave = polygonListeners.current.get(`${lineLayerId}-leave`);
+        if (fillEnter) mapInstance.off("mouseenter", fillLayerId, fillEnter);
+        if (fillLeave) mapInstance.off("mouseleave", fillLayerId, fillLeave);
+        if (lineEnter) mapInstance.off("mouseenter", lineLayerId, lineEnter);
+        if (lineLeave) mapInstance.off("mouseleave", lineLayerId, lineLeave);
+        polygonListeners.current.delete(`${fillLayerId}-enter`);
+        polygonListeners.current.delete(`${fillLayerId}-leave`);
+        polygonListeners.current.delete(`${lineLayerId}-enter`);
+        polygonListeners.current.delete(`${lineLayerId}-leave`);
+        if (mapInstance.getLayer(fillLayerId)) mapInstance.removeLayer(fillLayerId);
+        if (mapInstance.getLayer(lineLayerId)) mapInstance.removeLayer(lineLayerId);
+        if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+      }
+    });
+    drawnPolygons.forEach(polygon => {
       const sourceId = `polygon-${polygon.id}`;
       const fillLayerId = `polygon-fill-${polygon.id}`;
       const lineLayerId = `polygon-line-${polygon.id}`;
-
-      if (map.current!.getLayer(fillLayerId)) {
-        map.current!.removeLayer(fillLayerId);
+      const prevPolygon = prevPolygonsMap.get(polygon.id);
+      console.log("[MapComponent] drawnPolygons", prevPolygon)
+      if (!prevPolygon) {
+        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: polygon.name }, geometry: { type: "Polygon", coordinates: [[...polygon.coordinates, polygon.coordinates[0]]] } } });
+        mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": polygon.color, "fill-opacity": polygon.displayMode === "fill" ? 0.4 : 0 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
+        mapInstance.addLayer({ id: lineLayerId, type: "line", source: sourceId, paint: { "line-color": polygon.color, "line-width": 2 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
+        const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
+          const content = e.features?.[0]?.properties?.name as string || "";
+          if (!content || !mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "pointer";
+          popup.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false }).setLngLat(e.lngLat).setHTML(content).addTo(mapInstance);
+        };
+        const removePopup = () => {
+          if (!mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "";
+          popup.current?.remove();
+        };
+        mapInstance.on("mouseenter", fillLayerId, createPopup);
+        mapInstance.on("mouseleave", fillLayerId, removePopup);
+        mapInstance.on("mouseenter", lineLayerId, createPopup);
+        mapInstance.on("mouseleave", lineLayerId, removePopup);
+        polygonListeners.current.set(`${fillLayerId}-enter`, createPopup);
+        polygonListeners.current.set(`${fillLayerId}-leave`, removePopup);
+        polygonListeners.current.set(`${lineLayerId}-enter`, createPopup);
+        polygonListeners.current.set(`${lineLayerId}-leave`, removePopup);
+      } else {
+        if (prevPolygon.displayMode !== polygon.displayMode) {
+	  if (mapInstance.getLayer(fillLayerId)) {
+	    mapInstance.setLayoutProperty(fillLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
+	    mapInstance.setPaintProperty(fillLayerId, "fill-opacity", polygon.displayMode === "fill" ? 0.4 : 0);
+	  }
+	  if (mapInstance.getLayer(lineLayerId)) {
+	    mapInstance.setLayoutProperty(lineLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
+	  }
+        }
       }
-      if (map.current!.getLayer(lineLayerId)) {
-        map.current!.removeLayer(lineLayerId);
-      }
-      if (map.current!.getSource(sourceId)) {
-        map.current!.removeSource(sourceId);
-      }
-
-      const coordinates = [...polygon.coordinates, polygon.coordinates[0]];
-
-      const geojson = {
-        type: "FeatureCollection" as const,
-        features: [
-          {
-            type: "Feature" as const,
-            properties: { name: polygon.name },
-            geometry: {
-              type: "Polygon" as const,
-              coordinates: [coordinates],
-            },
-          },
-        ],
-      };
-
-      map.current!.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
-
-      map.current!.addLayer({
-        id: fillLayerId,
-        type: "fill",
-        source: sourceId,
-        paint: {
-          "fill-color": polygon.color,
-          "fill-opacity": 0.4,
-        },
-      });
-
-      map.current!.addLayer({
-        id: lineLayerId,
-        type: "line",
-        source: sourceId,
-        paint: {
-          "line-color": polygon.color,
-          "line-width": 2,
-        },
-      });
     });
   }, [drawnPolygons]);
 
-  // 矢印を表示
+  // --- Drawn Arrows Management (Efficient) ---
+  const prevDrawnArrows = usePrevious(arrows);
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-
-    arrows.forEach((arrow) => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
+    const prevArrowsMap = new Map(prevDrawnArrows?.map(a => [a.id, a]));
+    const currentArrowsMap = new Map(arrows.map(a => [a.id, a]));
+    prevArrowsMap.forEach((_, id) => {
+      if (!currentArrowsMap.has(id)) {
+        const sourceId = `arrow-${id}`;
+        const layerId = `arrow-line-${id}`;
+        const enterListener = arrowListeners.current.get(`${layerId}-enter`);
+        const leaveListener = arrowListeners.current.get(`${layerId}-leave`);
+        if (enterListener) mapInstance.off("mouseenter", layerId, enterListener);
+        if (leaveListener) mapInstance.off("mouseleave", layerId, leaveListener);
+        arrowListeners.current.delete(`${layerId}-enter`);
+        arrowListeners.current.delete(`${layerId}-leave`);
+        if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
+        if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+      }
+    });
+    arrows.forEach(arrow => {
       const sourceId = `arrow-${arrow.id}`;
-      const layerId = `arrow-${arrow.id}`;
-
-      if (map.current!.getLayer(layerId)) {
-        map.current!.removeLayer(layerId);
+      const layerId = `arrow-line-${arrow.id}`;
+      const prevArrow = prevArrowsMap.get(arrow.id);
+      if (!prevArrow) {
+        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: arrow.memo || "矢印" }, geometry: { type: "LineString", coordinates: [arrow.start, arrow.end] } } });
+        mapInstance.addLayer({ id: layerId, type: "line", source: sourceId, paint: { "line-color": "#dc2626", "line-width": 3 }, layout: { visibility: arrow.displayMode !== "hidden" ? "visible" : "none" } });
+        const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
+          const content = e.features?.[0]?.properties?.name as string || "";
+          if (!content || !mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "pointer";
+          popup.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false }).setLngLat(e.lngLat).setHTML(content).addTo(mapInstance);
+        };
+        const removePopup = () => {
+          if (!mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "";
+          popup.current?.remove();
+        };
+        mapInstance.on("mouseenter", layerId, createPopup);
+        mapInstance.on("mouseleave", layerId, removePopup);
+        arrowListeners.current.set(`${layerId}-enter`, createPopup);
+        arrowListeners.current.set(`${layerId}-leave`, removePopup);
+      } else {
+	if (prevArrow.displayMode !== arrow.displayMode) {
+	  if (mapInstance.getLayer(layerId)) {
+	    mapInstance.setLayoutProperty(layerId, "visibility", arrow.displayMode !== "hidden" ? "visible" : "none");
+	  }
+	}
       }
-      if (map.current!.getSource(sourceId)) {
-        map.current!.removeSource(sourceId);
-      }
-
-      const geojson = {
-        type: "FeatureCollection" as const,
-        features: [
-          {
-            type: "Feature" as const,
-            properties: { memo: arrow.memo },
-            geometry: {
-              type: "LineString" as const,
-              coordinates: [arrow.start, arrow.end],
-            },
-          },
-        ],
-      };
-
-      map.current!.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
-
-      map.current!.addLayer({
-        id: layerId,
-        type: "line",
-        source: sourceId,
-        paint: {
-          "line-color": "#dc2626",
-          "line-width": 3,
-        },
-      });
     });
   }, [arrows]);
 
-  // 注記を表示
+  // --- Drawn Notes Management (Efficient) ---
+  const prevDrawnNotes = usePrevious(notes);
   useEffect(() => {
-    if (!map.current || !map.current.isStyleLoaded()) return;
-
-    notes.forEach((note) => {
+    const mapInstance = map.current;
+    if (!mapInstance || !mapInstance.isStyleLoaded()) return;
+    const prevNotesMap = new Map(prevDrawnNotes?.map(n => [n.id, n]));
+    const currentNotesMap = new Map(notes.map(n => [n.id, n]));
+    prevNotesMap.forEach((_, id) => {
+      if (!currentNotesMap.has(id)) {
+        const sourceId = `note-${id}`;
+        const circleLayerId = `note-circle-${id}`;
+        const textLayerId = `note-text-${id}`;
+        const circleEnter = noteListeners.current.get(`${circleLayerId}-enter`);
+        const circleLeave = noteListeners.current.get(`${circleLayerId}-leave`);
+        const textEnter = noteListeners.current.get(`${textLayerId}-enter`);
+        const textLeave = noteListeners.current.get(`${textLayerId}-leave`);
+        if (circleEnter) mapInstance.off("mouseenter", circleLayerId, circleEnter);
+        if (circleLeave) mapInstance.off("mouseleave", circleLayerId, circleLeave);
+        if (textEnter) mapInstance.off("mouseenter", textLayerId, textEnter);
+        if (textLeave) mapInstance.off("mouseleave", textLayerId, textLeave);
+        noteListeners.current.delete(`${circleLayerId}-enter`);
+        noteListeners.current.delete(`${circleLayerId}-leave`);
+        noteListeners.current.delete(`${textLayerId}-enter`);
+        noteListeners.current.delete(`${textLayerId}-leave`);
+        if (mapInstance.getLayer(circleLayerId)) mapInstance.removeLayer(circleLayerId);
+        if (mapInstance.getLayer(textLayerId)) mapInstance.removeLayer(textLayerId);
+        if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+      }
+    });
+    notes.forEach(note => {
       const sourceId = `note-${note.id}`;
-      const layerId = `note-${note.id}`;
+      const circleLayerId = `note-circle-${note.id}`;
       const textLayerId = `note-text-${note.id}`;
-
-      if (map.current!.getLayer(textLayerId)) {
-        map.current!.removeLayer(textLayerId);
+      const prevNote = prevNotesMap.get(note.id);
+      if (!prevNote) {
+        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: note.text }, geometry: { type: "Point", coordinates: note.position } } });
+        mapInstance.addLayer({ id: circleLayerId, type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#059669" }, layout: { visibility: note.displayMode !== "hidden" ? "visible" : "none" } });
+        mapInstance.addLayer({ id: textLayerId, type: "symbol", source: sourceId, layout: { "text-field": note.text, "text-offset": [0, 1.2], "text-anchor": "top", "text-size": 12, visibility: note.displayMode !== "hidden" ? "visible" : "none" }, paint: { "text-color": "#000", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+        const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
+          const content = e.features?.[0]?.properties?.name as string || "";
+          if (!content || !mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "pointer";
+          popup.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false }).setLngLat(e.lngLat).setHTML(content).addTo(mapInstance);
+        };
+        const removePopup = () => {
+          if (!mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "";
+          popup.current?.remove();
+        };
+        mapInstance.on("mouseenter", circleLayerId, createPopup);
+        mapInstance.on("mouseleave", circleLayerId, removePopup);
+        mapInstance.on("mouseenter", textLayerId, createPopup);
+        mapInstance.on("mouseleave", textLayerId, removePopup);
+        noteListeners.current.set(`${circleLayerId}-enter`, createPopup);
+        noteListeners.current.set(`${circleLayerId}-leave`, removePopup);
+        noteListeners.current.set(`${textLayerId}-enter`, createPopup);
+        noteListeners.current.set(`${textLayerId}-leave`, removePopup);
+      } else {
+        if (prevNote.displayMode !== note.displayMode) {
+	  if (mapInstance.getLayer(circleLayerId)) {
+	    mapInstance.setLayoutProperty(circleLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
+	  }
+	  if (mapInstance.getLayer(textLayerId)) {
+	    mapInstance.setLayoutProperty(textLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
+	  }
+        }
       }
-      if (map.current!.getLayer(layerId)) {
-        map.current!.removeLayer(layerId);
-      }
-      if (map.current!.getSource(sourceId)) {
-        map.current!.removeSource(sourceId);
-      }
-
-      const geojson = {
-        type: "FeatureCollection" as const,
-        features: [
-          {
-            type: "Feature" as const,
-            properties: { text: note.text },
-            geometry: {
-              type: "Point" as const,
-              coordinates: note.position,
-            },
-          },
-        ],
-      };
-
-      map.current!.addSource(sourceId, {
-        type: "geojson",
-        data: geojson,
-      });
-
-      map.current!.addLayer({
-        id: layerId,
-        type: "circle",
-        source: sourceId,
-        paint: {
-          "circle-radius": 8,
-          "circle-color": "#059669",
-          "circle-stroke-width": 2,
-          "circle-stroke-color": "#fff",
-        },
-      });
-
-      map.current!.addLayer({
-        id: textLayerId,
-        type: "symbol",
-        source: sourceId,
-        layout: {
-          "text-field": ["get", "text"],
-          "text-offset": [0, 1.5],
-          "text-anchor": "top",
-          "text-size": 14,
-        },
-        paint: {
-          "text-color": "#000",
-          "text-halo-color": "#fff",
-          "text-halo-width": 2,
-        },
-      });
     });
   }, [notes]);
 
   return (
     <>
-      <div
-        ref={mapContainer}
-        style={{
-          width: "100%",
-          height: "100%",
-          cursor: drawMode !== "none" ? "crosshair" : "grab",
-        }}
-      />
-      {drawMode === "polygon" && polygonPoints.length > 0 && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            backgroundColor: "white",
-            padding: "12px 20px",
-            borderRadius: "8px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-            fontSize: "14px",
-            zIndex: 10,
-          }}
-        >
-          頂点: {polygonPoints.length}個 | ダブルクリックで完成
-        </div>
-      )}
-      {drawMode === "arrow" && arrowStart && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "20px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            backgroundColor: "white",
-            padding: "12px 20px",
-            borderRadius: "8px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-            fontSize: "14px",
-            zIndex: 10,
-          }}
-        >
-          終点をクリックしてください
-        </div>
-      )}
+      <div ref={mapContainer} style={{ width: "100%", height: "100%", cursor: drawMode !== "none" ? "crosshair" : "grab" }} />
+      {drawMode === "polygon" && polygonPoints.length > 0 && (<div className="map-overlay-message">頂点: {polygonPoints.length}個 | ダブルクリックで完成</div>)}
+      {drawMode === "arrow" && arrowStart && (<div className="map-overlay-message">終点をクリックしてください</div>)}
     </>
   );
 }
+

@@ -1,0 +1,100 @@
+.sidebar {
+  width: 300px;
+  background-color: #f8f9fa;
+  border-left: 1px solid #dee2e6;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.sidebar-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin-top: 0;
+  margin-bottom: 16px;
+  color: #343a40;
+}
+
+.sidebar-empty-message {
+  color: #6c757d;
+  text-align: center;
+  margin-top: 20px;
+}
+
+.sidebar-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  background-color: #fff;
+  border: 1px solid #e9ecef;
+  transition: background-color 0.2s;
+}
+
+.sidebar-item:hover {
+  background-color: #f1f3f5;
+}
+
+.item-icon {
+  margin-right: 10px;
+  font-size: 16px;
+}
+
+.item-name {
+  flex-grow: 1;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item-controls {
+  display: flex;
+  align-items: center;
+}
+
+.item-controls button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  margin-left: 4px;
+  border-radius: 4px;
+  font-size: 16px;
+  line-height: 1;
+  transition: background-color 0.2s;
+}
+
+.item-controls button:hover {
+  background-color: #e9ecef;
+}
+
+.display-mode-toggle {
+  color: #495057;
+  font-weight: bold;
+}
+
+.display-mode-toggle:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.visibility-toggle {
+  opacity: 0.5;
+}
+
+.visibility-toggle.visible {
+  opacity: 1;
+}
+
+.delete-button {
+  color: #dc3545;
+}

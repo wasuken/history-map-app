@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import MapComponent from "./components/MapComponent";
 import SearchBar from "./components/SearchBar";
 import Toolbar from "./components/Toolbar";
+import Sidebar from "./components/Sidebar";
 import type {
   Country,
   CountryCollection,
@@ -14,6 +15,7 @@ import type {
 } from "./types";
 import { HISTORICAL_YEARS, getHistoricalDataUrl } from "./data/historicalYears";
 import "./components/Header.css";
+import "./components/Sidebar.css";
 
 // ハイライト用の色の配列
 const HIGHLIGHT_COLORS = [
@@ -82,6 +84,9 @@ function App() {
         });
     }
   }, [searchMode, selectedYear]);
+  useEffect(() => {
+    console.log("[App] drawnPolygons", drawnPolygons)
+  }, [drawnPolygons])
 
   const handleSelectCountry = (country: Country) => {
     setHighlightedCountries((prev) => {
@@ -153,6 +158,67 @@ function App() {
     alert("PNG出力機能は次に実装します!");
   };
 
+  // 描画オブジェクトの表示/非表示を切り替える
+  const handleToggleVisibility = (
+    id: string,
+    type: "polygon" | "arrow" | "note",
+  ) => {
+    if (type === "polygon") {
+      setDrawnPolygons((prev) =>
+        prev.map((p) => {
+          if (p.id !== id) return p;
+          // 非表示の場合は 'fill' に戻し、表示中の場合は 'hidden' にする
+          const newDisplayMode = p.displayMode === "hidden" ? "fill" : "hidden";
+          return { ...p, displayMode: newDisplayMode };
+        }),
+      );
+    } else if (type === "arrow") {
+      setArrows((prev) =>
+        prev.map((a) => {
+          if (a.id !== id) return a;
+          const newDisplayMode =
+            a.displayMode === "hidden" ? "visible" : "hidden";
+          return { ...a, displayMode: newDisplayMode };
+        }),
+      );
+    } else if (type === "note") {
+      setNotes((prev) =>
+        prev.map((n) => {
+          if (n.id !== id) return n;
+          const newDisplayMode =
+            n.displayMode === "hidden" ? "visible" : "hidden";
+          return { ...n, displayMode: newDisplayMode };
+        }),
+      );
+    }
+  };
+
+  // 描画オブジェクトを削除する
+  const handleDeleteItem = (
+    id: string,
+    type: "polygon" | "arrow" | "note",
+  ) => {
+    if (type === "polygon") {
+      setDrawnPolygons((prev) => prev.filter((p) => p.id !== id));
+    } else if (type === "arrow") {
+      setArrows((prev) => prev.filter((a) => a.id !== id));
+    } else if (type === "note") {
+      setNotes((prev) => prev.filter((n) => n.id !== id));
+    }
+  };
+
+  // ポリゴンの表示モードを切り替える (fill / outline)
+  const handleTogglePolygonDisplayMode = (id: string) => {
+    setDrawnPolygons((prev) =>
+      prev.map((p) => {
+        if (p.id !== id || p.displayMode === "hidden") return p;
+        // 'fill' と 'outline' の間で切り替える
+        const newDisplayMode = p.displayMode === "fill" ? "outline" : "fill";
+        return { ...p, displayMode: newDisplayMode };
+      }),
+    );
+  };
+
   return (
     <div
       style={{
@@ -220,55 +286,58 @@ function App() {
         />
       </div>
 
-      {/* 地図エリア */}
-      <div style={{ flex: 1, position: "relative" }}>
-        {isLoading && (
-          <div
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "50%",
-              transform: "translate(-50%, -50%)",
-              zIndex: 100,
-              fontSize: "18px",
-              color: "#666",
-            }}
-          >
-            読み込み中...
-          </div>
-        )}
-        <MapComponent
-          highlightedCountries={highlightedCountries}
-          drawMode={drawMode}
-          drawnPolygons={drawnPolygons}
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* メインコンテンツ */}
+        <div style={{ flex: 1, position: "relative" }}>
+          {isLoading && (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "50%",
+                transform: "translate(-50%, -50%)",
+                zIndex: 100,
+                fontSize: "18px",
+                color: "#666",
+              }}
+            >
+              読み込み中...
+            </div>
+          )}
+          <MapComponent
+            highlightedCountries={highlightedCountries}
+            drawMode={drawMode}
+            drawnPolygons={drawnPolygons}
+            arrows={arrows}
+            notes={notes}
+            onAddPolygon={(polygon) =>
+	      {
+			      console.log("[onAddPolygon]", polygon)
+		              setDrawnPolygons((prev) => [
+                ...prev,
+                { ...polygon, displayMode: "fill" },
+              ])
+	      }
+            }
+            onAddArrow={(arrow) =>
+              setArrows((prev) => [...prev, { ...arrow, displayMode: "visible" }])
+            }
+            onAddNote={(note) =>
+              setNotes((prev) => [...prev, { ...note, displayMode: "visible" }])
+            }
+          />
+        </div>
+
+        {/* サイドバー */}
+        <Sidebar
+          polygons={drawnPolygons}
           arrows={arrows}
           notes={notes}
-          onAddPolygon={(polygon) =>
-            setDrawnPolygons((prev) => [...prev, polygon])
-          }
-          onAddArrow={(arrow) => setArrows((prev) => [...prev, arrow])}
-          onAddNote={(note) => setNotes((prev) => [...prev, note])}
+          onToggleVisibility={handleToggleVisibility}
+          onDeleteItem={handleDeleteItem}
+          onTogglePolygonDisplayMode={handleTogglePolygonDisplayMode}
         />
       </div>
-
-      {/* ステータス表示 */}
-      {(drawnPolygons.length > 0 || arrows.length > 0 || notes.length > 0) && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "20px",
-            right: "20px",
-            backgroundColor: "white",
-            padding: "12px 16px",
-            borderRadius: "8px",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
-            fontSize: "14px",
-            zIndex: 10,
-          }}
-        >
-          📐 {drawnPolygons.length} ・ ➡️ {arrows.length} ・ 📝 {notes.length}
-        </div>
-      )}
     </div>
   );
 }
