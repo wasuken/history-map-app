@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import type { Country, DrawMode, DrawnPolygon, Arrow, Note } from "../types";
+import type {
+  Country,
+  DrawMode,
+  DrawnPolygon,
+  Arrow,
+  Note,
+  HighlightedCountry,
+} from "../types";
 
 interface MapProps {
   onMapLoad?: (map: maplibregl.Map) => void;
-  highlightedCountry?: Country | null;
+  highlightedCountries: HighlightedCountry[];
   drawMode: DrawMode;
   drawnPolygons: DrawnPolygon[];
   arrows: Arrow[];
@@ -15,9 +22,9 @@ interface MapProps {
   onAddNote: (note: Note) => void;
 }
 
-export default function Map({
+export default function MapComponent({
   onMapLoad,
-  highlightedCountry,
+  highlightedCountries,
   drawMode,
   drawnPolygons,
   arrows,
@@ -30,6 +37,10 @@ export default function Map({
   const map = useRef<maplibregl.Map | null>(null);
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [arrowStart, setArrowStart] = useState<[number, number] | null>(null);
+  // sourceId をキーとして、関連するレイヤーIDを管理
+  const highlightedLayers = useRef<
+    Map<string, { fill: string; line: string }>
+  >(new Map());
 
   useEffect(() => {
     if (!mapContainer.current || map.current) return;
@@ -154,52 +165,105 @@ export default function Map({
   // ハイライト表示の更新
   useEffect(() => {
     if (!map.current || !map.current.isStyleLoaded()) return;
+    const mapInstance = map.current;
 
-    const sourceId = "highlighted-country";
-    const layerId = "highlighted-country-layer";
-
-    if (map.current.getLayer(layerId)) {
-      map.current.removeLayer(layerId);
-    }
-    if (map.current.getSource(sourceId)) {
-      map.current.removeSource(sourceId);
-    }
-
-    if (highlightedCountry) {
-      map.current.addSource(sourceId, {
-        type: "geojson",
-        data: highlightedCountry,
+    const newLayerMap = new Map<string, { fill: string; line: string }>();
+    highlightedCountries.forEach((hc) => {
+      const countryId = (
+        `${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()
+      ).replace(/[^a-zA-Z0-9]/g, "_");
+      const sourceId = `highlighted-source-${countryId}`;
+      newLayerMap.set(sourceId, {
+        fill: `highlighted-fill-${countryId}`,
+        line: `highlighted-line-${countryId}`,
       });
+    });
 
-      map.current.addLayer({
-        id: layerId,
-        type: "fill",
-        source: sourceId,
-        paint: {
-          "fill-color": "#3b82f6",
-          "fill-opacity": 0.5,
-          "fill-outline-color": "#1d4ed8",
-        },
-      });
+    // 不要になった古いレイヤーとソースを削除
+    highlightedLayers.current.forEach((layerIds, sourceId) => {
+      if (!newLayerMap.has(sourceId)) {
+        if (mapInstance.getLayer(layerIds.fill))
+          mapInstance.removeLayer(layerIds.fill);
+        if (mapInstance.getLayer(layerIds.line))
+          mapInstance.removeLayer(layerIds.line);
+        if (mapInstance.getSource(sourceId))
+          mapInstance.removeSource(sourceId);
+      }
+    });
 
-      const bounds = new maplibregl.LngLatBounds();
-      const addCoordinates = (coords: any) => {
-        try {
-          console.log("debug:coords", coords);
-          if (Array.isArray(coords[0]) && typeof coords[0][0] === "number") {
-            bounds.extend(coords as [number, number]);
+    const bounds = new maplibregl.LngLatBounds();
+
+    highlightedCountries.forEach((hc) => {
+      const countryId = (
+        `${hc.yearLabel}-${hc.country.properties.NAME}` || crypto.randomUUID()
+      ).replace(/[^a-zA-Z0-9]/g, "_");
+      const sourceId = `highlighted-source-${countryId}`;
+      const fillLayerId = `highlighted-fill-${countryId}`;
+      const lineLayerId = `highlighted-line-${countryId}`;
+
+      if (!mapInstance.getSource(sourceId)) {
+        mapInstance.addSource(sourceId, {
+          type: "geojson",
+          data: hc.country,
+        });
+      }
+
+      // Fill Layer
+      if (!mapInstance.getLayer(fillLayerId)) {
+        mapInstance.addLayer({
+          id: fillLayerId,
+          type: "fill",
+          source: sourceId,
+          paint: {
+            "fill-color": hc.color,
+            "fill-opacity": hc.displayMode === "fill" ? 0.4 : 0,
+          },
+        });
+      } else {
+        mapInstance.setPaintProperty(
+          fillLayerId,
+          "fill-opacity",
+          hc.displayMode === "fill" ? 0.4 : 0,
+        );
+      }
+
+      // Line Layer
+      if (!mapInstance.getLayer(lineLayerId)) {
+        mapInstance.addLayer({
+          id: lineLayerId,
+          type: "line",
+          source: sourceId,
+          paint: {
+            "line-color": hc.color,
+            "line-width": 1.5,
+          },
+        });
+      } else {
+        mapInstance.setPaintProperty(lineLayerId, "line-color", hc.color);
+      }
+
+      // バウンディングボックスの計算
+      const addCoordinatesToBounds = (coordinates: any) => {
+        if (!coordinates) return;
+        for (const coord of coordinates) {
+          if (typeof coord[0] === "number") {
+            bounds.extend(coord as [number, number]);
           } else {
-            coords.forEach(addCoordinates);
+            addCoordinatesToBounds(coord);
           }
-        } catch (e) {
-          console.error(e);
         }
       };
-      addCoordinates(highlightedCountry.geometry.coordinates);
+      addCoordinatesToBounds(hc.country.geometry.coordinates);
+    });
 
-      map.current.fitBounds(bounds, { padding: 50, maxZoom: 6 });
+    // 新しいレイヤー情報を保存
+    highlightedLayers.current = newLayerMap;
+
+    // すべてのハイライトが表示されるように地図を調整
+    if (!bounds.isEmpty()) {
+      mapInstance.fitBounds(bounds, { padding: 100, maxZoom: 6 });
     }
-  }, [highlightedCountry]);
+  }, [highlightedCountries]);
 
   // 描画中のポリゴンを表示
   useEffect(() => {

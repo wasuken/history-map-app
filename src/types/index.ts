@@ -51,3 +51,12 @@ export interface Note {
   position: [number, number]; // [lng, lat]
   text: string;
 }
+
+// ハイライトされた国
+export interface HighlightedCountry {
+  id: string;
+  country: Country;
+  color: string;
+  yearLabel: string;
+  displayMode: "fill" | "outline";
+}

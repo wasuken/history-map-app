@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import Map from "./components/Map";
+import MapComponent from "./components/MapComponent";
 import SearchBar from "./components/SearchBar";
 import Toolbar from "./components/Toolbar";
 import type {
@@ -10,15 +10,26 @@ import type {
   Arrow,
   Note,
   SearchMode,
+  HighlightedCountry,
 } from "./types";
 import { HISTORICAL_YEARS, getHistoricalDataUrl } from "./data/historicalYears";
 import "./components/Header.css";
 
+// ハイライト用の色の配列
+const HIGHLIGHT_COLORS = [
+  "#3b82f6", // blue-500
+  "#ef4444", // red-500
+  "#10b981", // green-500
+  "#f59e0b", // amber-500
+  "#8b5cf6", // violet-500
+  "#ec4899", // pink-500
+];
+
 function App() {
   const [countries, setCountries] = useState<Country[]>([]);
-  const [highlightedCountry, setHighlightedCountry] = useState<Country | null>(
-    null,
-  );
+  const [highlightedCountries, setHighlightedCountries] = useState<
+    HighlightedCountry[]
+  >([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // 検索関連
@@ -72,12 +83,68 @@ function App() {
     }
   }, [searchMode, selectedYear]);
 
+  const handleSelectCountry = (country: Country) => {
+    setHighlightedCountries((prev) => {
+      // これから追加しようとしている国の年代ラベルを特定
+      let yearLabel = "現代";
+      if (searchMode === "historical") {
+        const yearData = HISTORICAL_YEARS.find((y) => y.year === selectedYear);
+        if (yearData) {
+          yearLabel = yearData.label;
+        }
+      }
+
+      // 「名前」と「年代」の両方で国が既にハイライトされているかチェック
+      const existing = prev.find(
+        (hc) =>
+          hc.country.properties.NAME === country.properties.NAME &&
+          hc.yearLabel === yearLabel,
+      );
+
+      // 既に存在する場合は何もしない
+      if (existing) {
+        return prev;
+      }
+
+      // 新しくハイライトする
+      const colorIndex = prev.length % HIGHLIGHT_COLORS.length;
+      const newHighlightedCountry: HighlightedCountry = {
+        id: crypto.randomUUID(),
+        country,
+        color: HIGHLIGHT_COLORS[colorIndex],
+        yearLabel, // 特定した年代ラベルを使用
+        displayMode: "fill",
+      };
+      return [...prev, newHighlightedCountry];
+    });
+    setDrawMode("none");
+  };
+
+  // ハイライトの削除
+  const handleRemoveHighlight = (id: string) => {
+    setHighlightedCountries((prev) => prev.filter((hc) => hc.id !== id));
+  };
+
+  // ハイライトの表示モード切替
+  const handleToggleDisplayMode = (id: string) => {
+    setHighlightedCountries((prev) =>
+      prev.map((hc) =>
+        hc.id === id
+          ? {
+              ...hc,
+              displayMode: hc.displayMode === "fill" ? "outline" : "fill",
+            }
+          : hc,
+      ),
+    );
+  };
+
   const handleReset = () => {
     if (confirm("すべての描画をリセットしますか?")) {
       setDrawnPolygons([]);
       setArrows([]);
       setNotes([]);
-      setHighlightedCountry(null);
+      setHighlightedCountries([]);
       setDrawMode("none");
     }
   };
@@ -103,23 +170,43 @@ function App() {
         <div>
           <SearchBar
             countries={countries}
-            onSelectCountry={(country) => {
-              setHighlightedCountry(country);
-              setDrawMode("none");
-            }}
+            onSelectCountry={handleSelectCountry}
             searchMode={searchMode}
             onSearchModeChange={setSearchMode}
             selectedYear={selectedYear}
             onYearChange={setSelectedYear}
           />
 
-          {highlightedCountry && (
-            <button
-              onClick={() => setHighlightedCountry(null)}
-              className="highlight-reset-button"
-            >
-              ﾊｲﾗｲﾄ解除({highlightedCountry.properties.NAME})
-            </button>
+          {highlightedCountries.length > 0 && (
+            <div className="highlight-list">
+              <button
+                onClick={() => setHighlightedCountries([])}
+                className="highlight-reset-button all"
+              >
+                全解除
+              </button>
+              {highlightedCountries.map((hc) => (
+                <div
+                  key={hc.id}
+                  className="highlight-item"
+                  style={{ backgroundColor: hc.color }}
+                >
+                  <span
+                    className="highlight-label"
+                    onClick={() => handleToggleDisplayMode(hc.id)}
+                    title="クリックで表示切替"
+                  >
+                    {hc.yearLabel} - {hc.country.properties.NAME}
+                  </span>
+                  <button
+                    className="highlight-delete-button"
+                    onClick={() => handleRemoveHighlight(hc.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
@@ -150,8 +237,8 @@ function App() {
             読み込み中...
           </div>
         )}
-        <Map
-          highlightedCountry={highlightedCountry}
+        <MapComponent
+          highlightedCountries={highlightedCountries}
           drawMode={drawMode}
           drawnPolygons={drawnPolygons}
           arrows={arrows}

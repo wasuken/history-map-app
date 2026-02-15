@@ -22,18 +22,62 @@
   flex: 1 1 auto;
 }
 
-.highlight-reset-button {
-  padding: 8px 16px;
-  font-size: 14px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background-color: white;
+.highlight-list {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+/* 全解除ボタン */
+.highlight-reset-button.all {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 15px;
+  color: white;
+  font-size: 12px;
   cursor: pointer;
+  transition: opacity 0.2s;
+  background-color: #71717a; /* zinc-500 */
   white-space: nowrap;
 }
-.highlight-reset-button:hover {
-  background-color: #f5f5f5;
+.highlight-reset-button.all:hover {
+  opacity: 0.8;
 }
+
+.highlight-item {
+  display: flex;
+  align-items: center;
+  border-radius: 15px;
+  color: white;
+  font-size: 12px;
+  overflow: hidden; /* 角丸のため */
+  white-space: nowrap;
+}
+.highlight-label {
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+.highlight-label:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+}
+.highlight-delete-button {
+  background: rgba(0, 0, 0, 0.2);
+  border: none;
+  color: white;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  align-self: stretch; /* 高さを揃える */
+  transition: background-color 0.2s;
+}
+.highlight-delete-button:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
 
 /* Responsive Styles */
 @media (max-width: 900px) {
