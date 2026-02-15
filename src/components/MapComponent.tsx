@@ -10,15 +10,6 @@ import type {
   HighlightedCountry,
 } from "../types";
 
-// --- Helper Hook ---
-function usePrevious<T>(value: T): T | undefined {
-  const ref = useRef<T>();
-  useEffect(() => {
-    ref.current = value;
-  }, [value]);
-  return ref.current;
-}
-
 // displayModeはApp.tsxで処理されるため、onAddプロパティの型からは除外
 type OnAddPolygon = Omit<DrawnPolygon, "displayMode">;
 type OnAddArrow = Omit<Arrow, "displayMode">;
@@ -51,6 +42,11 @@ export default function MapComponent({
   const [polygonPoints, setPolygonPoints] = useState<[number, number][]>([]);
   const [arrowStart, setArrowStart] = useState<[number, number] | null>(null);
   const highlightedLayers = useRef<Map<string, { fill: string; line: string }>>(new Map());
+
+  // --- Refs to track what's actually rendered on the map ---
+  const polygonsOnMap = useRef<Map<string, DrawnPolygon>>(new Map());
+  const arrowsOnMap = useRef<Map<string, Arrow>>(new Map());
+  const notesOnMap = useRef<Map<string, Note>>(new Map());
 
   // --- Refs to store event listeners for proper cleanup ---
   const polygonListeners = useRef<Map<string, any>>(new Map());
@@ -188,15 +184,13 @@ export default function MapComponent({
     if (!bounds.isEmpty()) mapInstance.fitBounds(bounds, { padding: 100, maxZoom: 6 });
   }, [highlightedCountries]);
 
-  // --- Drawn Polygons Management (Efficient) ---
-  const prevDrawnPolygons = usePrevious(drawnPolygons);
+  // --- Drawn Polygons Management ---
   useEffect(() => {
     const mapInstance = map.current;
     if (!mapInstance || !mapInstance.isStyleLoaded()) return;
-    const prevPolygonsMap = new Map(prevDrawnPolygons?.map(p => [p.id, p]));
-    const currentPolygonsMap = new Map(drawnPolygons.map(p => [p.id, p]));
-    prevPolygonsMap.forEach((_, id) => {
-      if (!currentPolygonsMap.has(id)) {
+    const currentIds = new Set(drawnPolygons.map(p => p.id));
+    polygonsOnMap.current.forEach((_, id) => {
+      if (!currentIds.has(id)) {
         const sourceId = `polygon-${id}`;
         const fillLayerId = `polygon-fill-${id}`;
         const lineLayerId = `polygon-line-${id}`;
@@ -215,18 +209,24 @@ export default function MapComponent({
         if (mapInstance.getLayer(fillLayerId)) mapInstance.removeLayer(fillLayerId);
         if (mapInstance.getLayer(lineLayerId)) mapInstance.removeLayer(lineLayerId);
         if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+        polygonsOnMap.current.delete(id);
       }
     });
     drawnPolygons.forEach(polygon => {
       const sourceId = `polygon-${polygon.id}`;
       const fillLayerId = `polygon-fill-${polygon.id}`;
       const lineLayerId = `polygon-line-${polygon.id}`;
-      const prevPolygon = prevPolygonsMap.get(polygon.id);
-      console.log("[MapComponent] drawnPolygons", prevPolygon)
-      if (!prevPolygon) {
-        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: polygon.name }, geometry: { type: "Polygon", coordinates: [[...polygon.coordinates, polygon.coordinates[0]]] } } });
-        mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": polygon.color, "fill-opacity": polygon.displayMode === "fill" ? 0.4 : 0 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
-        mapInstance.addLayer({ id: lineLayerId, type: "line", source: sourceId, paint: { "line-color": polygon.color, "line-width": 2 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
+      const existing = polygonsOnMap.current.get(polygon.id);
+      if (!existing) {
+        if (!mapInstance.getSource(sourceId)) {
+          mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: polygon.name }, geometry: { type: "Polygon", coordinates: [[...polygon.coordinates, polygon.coordinates[0]]] } } });
+        }
+        if (!mapInstance.getLayer(fillLayerId)) {
+          mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": polygon.color, "fill-opacity": polygon.displayMode === "fill" ? 0.4 : 0 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
+        }
+        if (!mapInstance.getLayer(lineLayerId)) {
+          mapInstance.addLayer({ id: lineLayerId, type: "line", source: sourceId, paint: { "line-color": polygon.color, "line-width": 2 }, layout: { visibility: polygon.displayMode !== "hidden" ? "visible" : "none" } });
+        }
         const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
           const content = e.features?.[0]?.properties?.name as string || "";
           if (!content || !mapInstance) return;
@@ -246,29 +246,27 @@ export default function MapComponent({
         polygonListeners.current.set(`${fillLayerId}-leave`, removePopup);
         polygonListeners.current.set(`${lineLayerId}-enter`, createPopup);
         polygonListeners.current.set(`${lineLayerId}-leave`, removePopup);
-      } else {
-        if (prevPolygon.displayMode !== polygon.displayMode) {
-	  if (mapInstance.getLayer(fillLayerId)) {
-	    mapInstance.setLayoutProperty(fillLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
-	    mapInstance.setPaintProperty(fillLayerId, "fill-opacity", polygon.displayMode === "fill" ? 0.4 : 0);
-	  }
-	  if (mapInstance.getLayer(lineLayerId)) {
-	    mapInstance.setLayoutProperty(lineLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
-	  }
+        polygonsOnMap.current.set(polygon.id, polygon);
+      } else if (existing.displayMode !== polygon.displayMode) {
+        if (mapInstance.getLayer(fillLayerId)) {
+          mapInstance.setLayoutProperty(fillLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
+          mapInstance.setPaintProperty(fillLayerId, "fill-opacity", polygon.displayMode === "fill" ? 0.4 : 0);
         }
+        if (mapInstance.getLayer(lineLayerId)) {
+          mapInstance.setLayoutProperty(lineLayerId, "visibility", polygon.displayMode !== "hidden" ? "visible" : "none");
+        }
+        polygonsOnMap.current.set(polygon.id, polygon);
       }
     });
   }, [drawnPolygons]);
 
-  // --- Drawn Arrows Management (Efficient) ---
-  const prevDrawnArrows = usePrevious(arrows);
+  // --- Drawn Arrows Management ---
   useEffect(() => {
     const mapInstance = map.current;
     if (!mapInstance || !mapInstance.isStyleLoaded()) return;
-    const prevArrowsMap = new Map(prevDrawnArrows?.map(a => [a.id, a]));
-    const currentArrowsMap = new Map(arrows.map(a => [a.id, a]));
-    prevArrowsMap.forEach((_, id) => {
-      if (!currentArrowsMap.has(id)) {
+    const currentIds = new Set(arrows.map(a => a.id));
+    arrowsOnMap.current.forEach((_, id) => {
+      if (!currentIds.has(id)) {
         const sourceId = `arrow-${id}`;
         const layerId = `arrow-line-${id}`;
         const enterListener = arrowListeners.current.get(`${layerId}-enter`);
@@ -279,15 +277,20 @@ export default function MapComponent({
         arrowListeners.current.delete(`${layerId}-leave`);
         if (mapInstance.getLayer(layerId)) mapInstance.removeLayer(layerId);
         if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+        arrowsOnMap.current.delete(id);
       }
     });
     arrows.forEach(arrow => {
       const sourceId = `arrow-${arrow.id}`;
       const layerId = `arrow-line-${arrow.id}`;
-      const prevArrow = prevArrowsMap.get(arrow.id);
-      if (!prevArrow) {
-        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: arrow.memo || "矢印" }, geometry: { type: "LineString", coordinates: [arrow.start, arrow.end] } } });
-        mapInstance.addLayer({ id: layerId, type: "line", source: sourceId, paint: { "line-color": "#dc2626", "line-width": 3 }, layout: { visibility: arrow.displayMode !== "hidden" ? "visible" : "none" } });
+      const existing = arrowsOnMap.current.get(arrow.id);
+      if (!existing) {
+        if (!mapInstance.getSource(sourceId)) {
+          mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: arrow.memo || "矢印" }, geometry: { type: "LineString", coordinates: [arrow.start, arrow.end] } } });
+        }
+        if (!mapInstance.getLayer(layerId)) {
+          mapInstance.addLayer({ id: layerId, type: "line", source: sourceId, paint: { "line-color": "#dc2626", "line-width": 3 }, layout: { visibility: arrow.displayMode !== "hidden" ? "visible" : "none" } });
+        }
         const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
           const content = e.features?.[0]?.properties?.name as string || "";
           if (!content || !mapInstance) return;
@@ -303,25 +306,23 @@ export default function MapComponent({
         mapInstance.on("mouseleave", layerId, removePopup);
         arrowListeners.current.set(`${layerId}-enter`, createPopup);
         arrowListeners.current.set(`${layerId}-leave`, removePopup);
-      } else {
-	if (prevArrow.displayMode !== arrow.displayMode) {
-	  if (mapInstance.getLayer(layerId)) {
-	    mapInstance.setLayoutProperty(layerId, "visibility", arrow.displayMode !== "hidden" ? "visible" : "none");
-	  }
-	}
+        arrowsOnMap.current.set(arrow.id, arrow);
+      } else if (existing.displayMode !== arrow.displayMode) {
+        if (mapInstance.getLayer(layerId)) {
+          mapInstance.setLayoutProperty(layerId, "visibility", arrow.displayMode !== "hidden" ? "visible" : "none");
+        }
+        arrowsOnMap.current.set(arrow.id, arrow);
       }
     });
   }, [arrows]);
 
-  // --- Drawn Notes Management (Efficient) ---
-  const prevDrawnNotes = usePrevious(notes);
+  // --- Drawn Notes Management ---
   useEffect(() => {
     const mapInstance = map.current;
     if (!mapInstance || !mapInstance.isStyleLoaded()) return;
-    const prevNotesMap = new Map(prevDrawnNotes?.map(n => [n.id, n]));
-    const currentNotesMap = new Map(notes.map(n => [n.id, n]));
-    prevNotesMap.forEach((_, id) => {
-      if (!currentNotesMap.has(id)) {
+    const currentIds = new Set(notes.map(n => n.id));
+    notesOnMap.current.forEach((_, id) => {
+      if (!currentIds.has(id)) {
         const sourceId = `note-${id}`;
         const circleLayerId = `note-circle-${id}`;
         const textLayerId = `note-text-${id}`;
@@ -340,17 +341,24 @@ export default function MapComponent({
         if (mapInstance.getLayer(circleLayerId)) mapInstance.removeLayer(circleLayerId);
         if (mapInstance.getLayer(textLayerId)) mapInstance.removeLayer(textLayerId);
         if (mapInstance.getSource(sourceId)) mapInstance.removeSource(sourceId);
+        notesOnMap.current.delete(id);
       }
     });
     notes.forEach(note => {
       const sourceId = `note-${note.id}`;
       const circleLayerId = `note-circle-${note.id}`;
       const textLayerId = `note-text-${note.id}`;
-      const prevNote = prevNotesMap.get(note.id);
-      if (!prevNote) {
-        mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: note.text }, geometry: { type: "Point", coordinates: note.position } } });
-        mapInstance.addLayer({ id: circleLayerId, type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#059669" }, layout: { visibility: note.displayMode !== "hidden" ? "visible" : "none" } });
-        mapInstance.addLayer({ id: textLayerId, type: "symbol", source: sourceId, layout: { "text-field": note.text, "text-offset": [0, 1.2], "text-anchor": "top", "text-size": 12, visibility: note.displayMode !== "hidden" ? "visible" : "none" }, paint: { "text-color": "#000", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+      const existing = notesOnMap.current.get(note.id);
+      if (!existing) {
+        if (!mapInstance.getSource(sourceId)) {
+          mapInstance.addSource(sourceId, { type: "geojson", data: { type: "Feature", properties: { name: note.text }, geometry: { type: "Point", coordinates: note.position } } });
+        }
+        if (!mapInstance.getLayer(circleLayerId)) {
+          mapInstance.addLayer({ id: circleLayerId, type: "circle", source: sourceId, paint: { "circle-radius": 5, "circle-color": "#059669" }, layout: { visibility: note.displayMode !== "hidden" ? "visible" : "none" } });
+        }
+        if (!mapInstance.getLayer(textLayerId)) {
+          mapInstance.addLayer({ id: textLayerId, type: "symbol", source: sourceId, layout: { "text-field": note.text, "text-offset": [0, 1.2], "text-anchor": "top", "text-size": 12, visibility: note.displayMode !== "hidden" ? "visible" : "none" }, paint: { "text-color": "#000", "text-halo-color": "#fff", "text-halo-width": 1.5 } });
+        }
         const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
           const content = e.features?.[0]?.properties?.name as string || "";
           if (!content || !mapInstance) return;
@@ -370,15 +378,15 @@ export default function MapComponent({
         noteListeners.current.set(`${circleLayerId}-leave`, removePopup);
         noteListeners.current.set(`${textLayerId}-enter`, createPopup);
         noteListeners.current.set(`${textLayerId}-leave`, removePopup);
-      } else {
-        if (prevNote.displayMode !== note.displayMode) {
-	  if (mapInstance.getLayer(circleLayerId)) {
-	    mapInstance.setLayoutProperty(circleLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
-	  }
-	  if (mapInstance.getLayer(textLayerId)) {
-	    mapInstance.setLayoutProperty(textLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
-	  }
+        notesOnMap.current.set(note.id, note);
+      } else if (existing.displayMode !== note.displayMode) {
+        if (mapInstance.getLayer(circleLayerId)) {
+          mapInstance.setLayoutProperty(circleLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
         }
+        if (mapInstance.getLayer(textLayerId)) {
+          mapInstance.setLayoutProperty(textLayerId, "visibility", note.displayMode !== "hidden" ? "visible" : "none");
+        }
+        notesOnMap.current.set(note.id, note);
       }
     });
   }, [notes]);

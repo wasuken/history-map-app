@@ -17,19 +17,19 @@ export default function Toolbar({
   return (
     <div className="toolbar-container">
       <button
-        onClick={() => onDrawModeChange("polygon")}
+        onClick={() => onDrawModeChange(drawMode === "polygon" ? "none" : "polygon")}
         className={`toolbar-button ${drawMode === "polygon" ? "active" : ""}`}
       >
         📐 ポリゴン
       </button>
       <button
-        onClick={() => onDrawModeChange("arrow")}
+        onClick={() => onDrawModeChange(drawMode === "arrow" ? "none" : "arrow")}
         className={`toolbar-button ${drawMode === "arrow" ? "active" : ""}`}
       >
         ➡️ 矢印
       </button>
       <button
-        onClick={() => onDrawModeChange("note")}
+        onClick={() => onDrawModeChange(drawMode === "note" ? "none" : "note")}
         className={`toolbar-button ${drawMode === "note" ? "active" : ""}`}
       >
         📝 注記

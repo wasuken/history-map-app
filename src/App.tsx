@@ -84,9 +84,14 @@ function App() {
         });
     }
   }, [searchMode, selectedYear]);
+  // ESCキーで作図モードをキャンセル
   useEffect(() => {
-    console.log("[App] drawnPolygons", drawnPolygons)
-  }, [drawnPolygons])
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawMode("none");
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const handleSelectCountry = (country: Country) => {
     setHighlightedCountries((prev) => {
