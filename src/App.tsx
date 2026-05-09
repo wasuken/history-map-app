@@ -265,7 +265,7 @@ function App() {
                     onClick={() => handleToggleDisplayMode(hc.id)}
                     title="クリックで表示切替"
                   >
-                    {hc.yearLabel} - {hc.country.properties.NAME}
+                    {hc.yearLabel} - {hc.country.properties.NAME_JA || hc.country.properties.NAME}
                   </span>
                   <button
                     className="highlight-delete-button"
@@ -308,6 +308,7 @@ function App() {
             </div>
           )}
           <MapComponent
+            countries={countries}
             highlightedCountries={highlightedCountries}
             drawMode={drawMode}
             drawnPolygons={drawnPolygons}
@@ -328,6 +329,7 @@ function App() {
             onAddNote={(note) =>
               setNotes((prev) => [...prev, { ...note, displayMode: "visible" }])
             }
+            onClickCountry={handleSelectCountry}
           />
         </div>
 

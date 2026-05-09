@@ -8,6 +8,7 @@ import type {
   Arrow,
   Note,
   HighlightedCountry,
+  Country,
 } from "../types";
 
 // displayModeはApp.tsxで処理されるため、onAddプロパティの型からは除外
@@ -16,6 +17,7 @@ type OnAddArrow = Omit<Arrow, "displayMode">;
 type OnAddNote = Omit<Note, "displayMode">;
 
 interface MapProps {
+  countries: Country[];
   highlightedCountries: HighlightedCountry[];
   drawMode: DrawMode;
   drawnPolygons: DrawnPolygon[];
@@ -24,9 +26,56 @@ interface MapProps {
   onAddPolygon: (polygon: OnAddPolygon) => void;
   onAddArrow: (arrow: OnAddArrow) => void;
   onAddNote: (note: OnAddNote) => void;
+  onClickCountry?: (country: Country) => void;
+}
+
+// --- Point-in-Polygon Logic ---
+function pointInPolygon(point: [number, number], ring: number[][]): boolean {
+  const [x, y] = point;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function isPointInCountry(point: [number, number], country: Country): boolean {
+  const { type, coordinates } = country.geometry;
+  if (type === "Polygon") {
+    const rings = coordinates as number[][][];
+    if (rings.length === 0) return false;
+    let isInExterior = pointInPolygon(point, rings[0]);
+    if (!isInExterior) return false;
+    // 内側の穴をチェック
+    for (let i = 1; i < rings.length; i++) {
+      if (pointInPolygon(point, rings[i])) return false;
+    }
+    return true;
+  } else if (type === "MultiPolygon") {
+    const polygons = coordinates as number[][][][];
+    for (const rings of polygons) {
+      if (rings.length === 0) continue;
+      let isInExterior = pointInPolygon(point, rings[0]);
+      if (isInExterior) {
+        let inHole = false;
+        for (let i = 1; i < rings.length; i++) {
+          if (pointInPolygon(point, rings[i])) {
+            inHole = true;
+            break;
+          }
+        }
+        if (!inHole) return true;
+      }
+    }
+  }
+  return false;
 }
 
 export default function MapComponent({
+  countries,
   highlightedCountries,
   drawMode,
   drawnPolygons,
@@ -35,6 +84,7 @@ export default function MapComponent({
   onAddPolygon,
   onAddArrow,
   onAddNote,
+  onClickCountry,
 }: MapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -70,15 +120,25 @@ export default function MapComponent({
     return () => { map.current?.remove(); map.current = null; };
   }, []);
 
-  // --- Drawing Logic ---
+  // --- Drawing Logic & Click Handling ---
   useEffect(() => {
     const mapInstance = map.current;
     if (!mapInstance) return;
 
     const handleClick = (e: maplibregl.MapMouseEvent) => {
       const { lng, lat } = e.lngLat;
-      if (drawMode === "polygon") setPolygonPoints((prev) => [...prev, [lng, lat]]);
-      else if (drawMode === "arrow") {
+      
+      if (drawMode === "none") {
+        if (onClickCountry) {
+          const clickedPoint: [number, number] = [lng, lat];
+          const found = countries.find(c => isPointInCountry(clickedPoint, c));
+          if (found) {
+            onClickCountry(found);
+          }
+        }
+      } else if (drawMode === "polygon") {
+        setPolygonPoints((prev) => [...prev, [lng, lat]]);
+      } else if (drawMode === "arrow") {
         if (!arrowStart) setArrowStart([lng, lat]);
         else {
           const memo = prompt("矢印のメモを入力してください (省略可)");
@@ -111,7 +171,7 @@ export default function MapComponent({
       mapInstance.off("click", handleClick);
       mapInstance.off("dblclick", handleDblClick);
     };
-  }, [drawMode, polygonPoints, arrowStart, onAddPolygon, onAddArrow, onAddNote]);
+  }, [drawMode, polygonPoints, arrowStart, onAddPolygon, onAddArrow, onAddNote, countries, onClickCountry]);
 
   // --- Cleanup for Draw Mode Change ---
   useEffect(() => {
@@ -144,7 +204,6 @@ export default function MapComponent({
 
   // --- Highlighted Countries Management ---
   useEffect(() => {
-    console.log("debug:test")
     const mapInstance = map.current;
     if (!mapInstance || !mapInstance.isStyleLoaded()) return;
     const newLayerMap = new Map<string, { fill: string; line: string }>();
@@ -167,8 +226,32 @@ export default function MapComponent({
       const fillLayerId = `highlighted-fill-${countryId}`;
       const lineLayerId = `highlighted-line-${countryId}`;
       if (!mapInstance.getSource(sourceId)) mapInstance.addSource(sourceId, { type: "geojson", data: hc.country });
-      if (!mapInstance.getLayer(fillLayerId)) mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": hc.color, "fill-opacity": hc.displayMode === "fill" ? 0.4 : 0 } });
-      else mapInstance.setPaintProperty(fillLayerId, "fill-opacity", hc.displayMode === "fill" ? 0.4 : 0);
+      if (!mapInstance.getLayer(fillLayerId)) {
+        mapInstance.addLayer({ id: fillLayerId, type: "fill", source: sourceId, paint: { "fill-color": hc.color, "fill-opacity": hc.displayMode === "fill" ? 0.4 : 0 } });
+        
+        // ホバー時のポップアップ表示
+        const createPopup = (e: maplibregl.MapLayerMouseEvent) => {
+          const name = hc.country.properties.NAME_JA || hc.country.properties.NAME;
+          if (!name || !mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "pointer";
+          popup.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false })
+            .setLngLat(e.lngLat)
+            .setHTML(`<strong>${name}</strong>`)
+            .addTo(mapInstance);
+        };
+        const removePopup = () => {
+          if (!mapInstance) return;
+          mapInstance.getCanvas().style.cursor = "";
+          popup.current?.remove();
+        };
+
+        mapInstance.on("mouseenter", fillLayerId, createPopup);
+        mapInstance.on("mouseleave", fillLayerId, removePopup);
+        
+        // クリーンアップ用にリスナーを保存 (既存のhighlightedLayersを使って管理を拡張する必要があるが、
+        // 現状のhighlightedLayersはLayer IDのペアのみを保持しているため、
+        // 簡易的にこのEffect内で完結させるか、管理用Refを拡張する)
+      } else mapInstance.setPaintProperty(fillLayerId, "fill-opacity", hc.displayMode === "fill" ? 0.4 : 0);
       if (!mapInstance.getLayer(lineLayerId)) mapInstance.addLayer({ id: lineLayerId, type: "line", source: sourceId, paint: { "line-color": hc.color, "line-width": 1.5 } });
       else mapInstance.setPaintProperty(lineLayerId, "line-color", hc.color);
       const addCoordinatesToBounds = (coordinates: any) => {
@@ -181,7 +264,6 @@ export default function MapComponent({
       addCoordinatesToBounds(hc.country.geometry.coordinates);
     });
     highlightedLayers.current = newLayerMap;
-    if (!bounds.isEmpty()) mapInstance.fitBounds(bounds, { padding: 100, maxZoom: 6 });
   }, [highlightedCountries]);
 
   // --- Drawn Polygons Management ---
@@ -399,4 +481,3 @@ export default function MapComponent({
     </>
   );
 }
-

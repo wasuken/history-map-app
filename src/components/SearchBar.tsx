@@ -110,11 +110,11 @@ export default function SearchBar({
                 className="suggestion-item"
               >
                 <div className="suggestion-item-name">
-                  {getCountryName(country)}
+                  {country.properties.NAME_JA || country.properties.NAME}
                 </div>
-                {getCountryNameJa(country) && (
+                {country.properties.NAME_JA && country.properties.NAME && (
                   <div className="suggestion-item-name-ja">
-                    {getCountryNameJa(country)}
+                    {country.properties.NAME}
                   </div>
                 )}
               </li>
